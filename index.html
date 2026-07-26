@@ -64,6 +64,7 @@
     }
     #map { width: 100%; }
     .top-row { padding-left: 46px; }
+    #header-sub { padding-left: 46px; }
   }
   #sidebar {
     width: 310px; min-width: 310px;
@@ -611,7 +612,7 @@ function renderSidebar() {
     totalKm += catKm; totalCount += items.length;
 
     const group = document.createElement('div');
-    group.className = 'cat-group';
+    group.className = 'cat-group open';
 
     const header = document.createElement('div');
     header.className = 'cat-header';
