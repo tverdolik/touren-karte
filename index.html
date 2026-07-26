@@ -212,6 +212,12 @@
     </div>
     <div class="sub" id="header-sub"></div>
 
+    <!--
+    Bearbeitungsfunktionen für die geteilte/öffentliche Version deaktiviert
+    (Tracks hinzufügen, Sichern, Wiederherstellen, Alle löschen).
+    Zum Wiederaktivieren diesen Block plus die zugehörigen Skript-Blöcke
+    weiter unten (gleiche Markierung) wieder einkommentieren.
+
     <div id="import-box">
       <p id="drop-text">GPX-Dateien hierher ziehen oder</p>
       <button class="btn primary" id="add-btn" onclick="document.getElementById('file-input').click()">+ Tracks hinzufügen</button>
@@ -225,6 +231,7 @@
       <button class="btn danger" id="delete-all-btn">Alle löschen</button>
       <input id="import-json-input" type="file" accept=".json" style="display:none" />
     </div>
+    -->
 
     <div id="master-row" class="master-row">
       <input type="checkbox" id="master-checkbox" />
@@ -288,17 +295,29 @@ function labelFor(cat) {
   return s.categories[cat] || LABELS[cat] || cat;
 }
 
+/* localStorage-Persistenz für die geteilte Version deaktiviert - diese Seite
+   soll immer exakt die eingebauten Daten zeigen, unabhängig davon, was im
+   Browser des Betrachters sonst gespeichert ist. Für die bearbeitbare
+   Version (mit Tracks hinzufügen/löschen) diesen Block wieder aktivieren:
+
 function loadTracks() {
   try {
     const raw = localStorage.getItem(STORAGE_KEY);
     if (raw) return JSON.parse(raw);
-  } catch (e) { /* fall through */ }
+  } catch (e) { /* fall through *\/ }
   // first run: seed with default tracks
   localStorage.setItem(STORAGE_KEY, JSON.stringify(DEFAULT_TRACKS));
   return JSON.parse(JSON.stringify(DEFAULT_TRACKS));
 }
 function saveTracks(tracks) {
   localStorage.setItem(STORAGE_KEY, JSON.stringify(tracks));
+}
+*/
+function loadTracks() {
+  return DEFAULT_TRACKS;
+}
+function saveTracks(tracks) {
+  // no-op: geteilte Version speichert nichts, siehe Markierung oben
 }
 
 // ---- RDP simplification ----
@@ -469,12 +488,14 @@ function applyStaticText() {
   document.title = s.pageTitle;
   document.documentElement.lang = currentLang;
   document.getElementById('app-heading').textContent = s.heading;
+  document.getElementById('master-label-text').textContent = s.allTracksLabel;
+  /* Bearbeitungsfunktionen deaktiviert - siehe Markierung oben im HTML
   document.getElementById('drop-text').textContent = s.dropText;
   document.getElementById('add-btn').textContent = s.addBtn;
   document.getElementById('export-btn').textContent = s.exportBtn;
   document.getElementById('import-json-btn').textContent = s.importBtn;
   document.getElementById('delete-all-btn').textContent = s.deleteAllBtn;
-  document.getElementById('master-label-text').textContent = s.allTracksLabel;
+  */
   document.getElementById('lang-select').value = currentLang;
 }
 
@@ -673,6 +694,7 @@ function renderSidebar() {
       meta.className = 'meta';
       meta.textContent = (t.date ? fmtDate(t.date) + ' · ' : '') + t.dist_km + 'km';
 
+      /* Einzel-Löschen für die geteilte Version deaktiviert - siehe Markierung oben im HTML
       const delBtn = document.createElement('button');
       delBtn.className = 'del-btn';
       delBtn.title = T().deleteTitle;
@@ -685,10 +707,12 @@ function renderSidebar() {
         saveTracks(tracks);
         renderAll(false);
       });
+      */
+      const delBtn = null;
 
       item.appendChild(left);
       item.appendChild(meta);
-      item.appendChild(delBtn);
+      // item.appendChild(delBtn); // deaktiviert
 
       item.addEventListener('click', (e) => {
         if (e.target === checkbox || e.target === delBtn) return;
@@ -732,6 +756,7 @@ function showStatus(msg, ok) {
 }
 
 // ---- file input handling ----
+/* Für die geteilte Version deaktiviert - siehe Markierung oben im HTML
 async function handleFiles(fileList) {
   const files = Array.from(fileList).filter(f => f.name.toLowerCase().endsWith('.gpx'));
   if (files.length === 0) { showStatus(T().statusNoGpx, false); return; }
@@ -753,6 +778,9 @@ async function handleFiles(fileList) {
   renderAll(true);
   showStatus(T().statusAdded(added, failed), failed === 0);
 }
+*/
+
+/* Bearbeitungsfunktionen für die geteilte Version deaktiviert - siehe Markierung oben im HTML
 
 document.getElementById('file-input').addEventListener('change', (e) => {
   handleFiles(e.target.files);
@@ -810,6 +838,8 @@ document.getElementById('import-json-input').addEventListener('change', async (e
   }
   e.target.value = '';
 });
+
+*/
 
 document.getElementById('lang-select').addEventListener('change', (e) => {
   currentLang = e.target.value;
