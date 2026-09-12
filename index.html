@@ -253,6 +253,8 @@
       <span class="cat-count" id="master-count"></span>
     </div>
 
+    <button class="btn primary" id="download-btn" style="width:100%; margin-bottom:12px;">⬇ Auswahl herunterladen (GPX)</button>
+
     <div id="groups"></div>
     <div id="totals"></div>
   </div>
@@ -317,7 +319,7 @@ function saveTracks(tracks) {
 // Trage hier deinen GitHub-Benutzernamen, den Repo-Namen, den Branch und
 // den Ordner ein, in dem deine .gpx-Dateien liegen.
 const GITHUB_CONFIG = {
-  owner: 'tverdolik',   // z.B. 'serg123'
+  owner: 'DEIN-GITHUB-NAME',   // z.B. 'serg123'
   repo: 'touren-karte',        // Name deines Repos
   branch: 'main',              // meist 'main' oder 'master'
   path: 'tracks'                // Ordner im Repo mit den .gpx-Dateien
@@ -500,6 +502,9 @@ const I18N = {
     deleteAllConfirm: 'Wirklich alle Tracks von der Karte löschen? Das kann nicht rückgängig gemacht werden.',
     deleteAllStatus: 'Alle Tracks wurden gelöscht.',
     allTracksLabel: 'Alle Tracks',
+    downloadBtn: '⬇ Auswahl herunterladen (GPX)',
+    downloadNoneStatus: 'Keine Tracks ausgewählt (Checkboxen ankreuzen).',
+    downloadDoneStatus: (n) => n + ' Track(s) heruntergeladen.',
     toursSuffix: ' Touren auf der Karte',
     totalPrefix: 'Gesamt: ',
     totalSuffix: ' km über alle Aktivitäten',
@@ -523,6 +528,9 @@ const I18N = {
     deleteAllConfirm: 'Really delete all tracks from the map? This cannot be undone.',
     deleteAllStatus: 'All tracks have been deleted.',
     allTracksLabel: 'All tracks',
+    downloadBtn: '⬇ Download selection (GPX)',
+    downloadNoneStatus: 'No tracks selected (check the boxes).',
+    downloadDoneStatus: (n) => n + ' track(s) downloaded.',
     toursSuffix: ' tours on the map',
     totalPrefix: 'Total: ',
     totalSuffix: ' km across all activities',
@@ -546,6 +554,9 @@ const I18N = {
     deleteAllConfirm: 'Действительно удалить все треки с карты? Это нельзя отменить.',
     deleteAllStatus: 'Все треки удалены.',
     allTracksLabel: 'Все треки',
+    downloadBtn: '⬇ Скачать выбранное (GPX)',
+    downloadNoneStatus: 'Треки не выбраны (отметьте галочками).',
+    downloadDoneStatus: (n) => 'Скачано треков: ' + n + '.',
     toursSuffix: ' маршрутов на карте',
     totalPrefix: 'Всего: ',
     totalSuffix: ' км по всем видам активности',
@@ -569,6 +580,7 @@ function applyStaticText() {
   document.documentElement.lang = currentLang;
   document.getElementById('app-heading').textContent = s.heading;
   document.getElementById('master-label-text').textContent = s.allTracksLabel;
+  document.getElementById('download-btn').textContent = s.downloadBtn;
   /* Bearbeitungsfunktionen deaktiviert - siehe Markierung oben im HTML
   document.getElementById('drop-text').textContent = s.dropText;
   document.getElementById('add-btn').textContent = s.addBtn;
@@ -973,6 +985,49 @@ async function initFromGitHub() {
   applyStaticText();
   renderAll(true);
 }
+
+// ---- Ausgewählte Tracks als GPX herunterladen ----
+function escXml(s) {
+  return String(s)
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;');
+}
+function buildCombinedGPX(selectedTracks) {
+  let xml = '<?xml version="1.0" encoding="UTF-8"?>\n';
+  xml += '<gpx version="1.1" creator="Touren-Karte" xmlns="http://www.topografix.com/GPX/1/1">\n';
+  selectedTracks.forEach(t => {
+    const name = labelFor(t.cat) + ' - ' + (t.date ? fmtDate(t.date) : '') + ' - ' + t.place;
+    xml += '  <trk>\n';
+    xml += '    <name>' + escXml(name) + '</name>\n';
+    xml += '    <trkseg>\n';
+    t.points.forEach(p => {
+      xml += '      <trkpt lat="' + p[0] + '" lon="' + p[1] + '"></trkpt>\n';
+    });
+    xml += '    </trkseg>\n';
+    xml += '  </trk>\n';
+  });
+  xml += '</gpx>\n';
+  return xml;
+}
+document.getElementById('download-btn').addEventListener('click', () => {
+  const selected = tracks.filter(t => visibleSet.has(t.file));
+  if (selected.length === 0) {
+    showLoadStatus(T().downloadNoneStatus, 'err');
+    return;
+  }
+  const gpx = buildCombinedGPX(selected);
+  const blob = new Blob([gpx], { type: 'application/gpx+xml' });
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement('a');
+  a.href = url;
+  a.download = 'touren_auswahl.gpx';
+  a.click();
+  URL.revokeObjectURL(url);
+  showLoadStatus(T().downloadDoneStatus(selected.length), 'ok');
+  setTimeout(() => { document.getElementById('load-status').className = ''; }, 3000);
+});
 
 initFromGitHub();
 </script>
