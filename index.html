@@ -325,28 +325,82 @@ const GITHUB_CONFIG = {
   path: 'tracks'                // Ordner im Repo mit den .gpx-Dateien
 };
 
-// ==== Lokaler Zwischenspeicher (Cache) ====
+// ==== Lokaler Zwischenspeicher (Cache) via IndexedDB ====
 // Jede geparste Track-Datei wird zusammen mit ihrem GitHub-"sha"
-// (Prüfsumme des Dateiinhalts) im Browser gespeichert. Beim nächsten
-// Öffnen wird nur die Ordner-Liste neu abgefragt (1 schnelle Anfrage) -
-// Dateien, deren sha sich nicht geändert hat, werden aus dem Cache
-// übernommen statt erneut heruntergeladen und geparst zu werden.
-const TRACK_CACHE_KEY = 'tourenkarte_track_cache_v1';
+// (Prüfsumme des Dateiinhalts) im Browser gespeichert - einzeln pro
+// Datei, nicht als ein großer Block. IndexedDB hat ein deutlich
+// größeres Speicherlimit als localStorage (dort konnte das Schreiben
+// bei vielen Tracks leise fehlschlagen, ohne dass man es gemerkt hat).
+// Beim nächsten Öffnen wird nur die Ordner-Liste neu abgefragt (1
+// schnelle Anfrage) - Dateien, deren sha sich nicht geändert hat,
+// werden aus dem Cache übernommen statt erneut heruntergeladen und
+// geparst zu werden.
+const IDB_NAME = 'tourenkarte-db';
+const IDB_VERSION = 1;
+const IDB_STORE = 'trackcache';
 
-function loadTrackCache() {
-  try {
-    const raw = localStorage.getItem(TRACK_CACHE_KEY);
-    return raw ? JSON.parse(raw) : {};
-  } catch (e) { return {}; }
+function openTrackDB() {
+  return new Promise((resolve, reject) => {
+    if (!window.indexedDB) { reject(new Error('IndexedDB nicht verfügbar')); return; }
+    const req = indexedDB.open(IDB_NAME, IDB_VERSION);
+    req.onupgradeneeded = () => {
+      const db = req.result;
+      if (!db.objectStoreNames.contains(IDB_STORE)) {
+        db.createObjectStore(IDB_STORE);
+      }
+    };
+    req.onsuccess = () => resolve(req.result);
+    req.onerror = () => reject(req.error);
+  });
 }
-function saveTrackCache(cache) {
+
+async function loadTrackCache() {
   try {
-    localStorage.setItem(TRACK_CACHE_KEY, JSON.stringify(cache));
+    const db = await openTrackDB();
+    return await new Promise((resolve, reject) => {
+      const tx = db.transaction(IDB_STORE, 'readonly');
+      const store = tx.objectStore(IDB_STORE);
+      const out = {};
+      const cursorReq = store.openCursor();
+      cursorReq.onsuccess = (e) => {
+        const cursor = e.target.result;
+        if (cursor) { out[cursor.key] = cursor.value; cursor.continue(); }
+        else resolve(out);
+      };
+      cursorReq.onerror = () => reject(cursorReq.error);
+    });
   } catch (e) {
-    // Speicher voll o.ä. - nicht schlimm, dann wird beim nächsten Mal
-    // einfach wieder mehr neu geladen.
-    console.warn('Track-Cache konnte nicht gespeichert werden:', e);
+    console.warn('Track-Cache konnte nicht gelesen werden:', e);
+    return {};
   }
+}
+
+async function saveTrackCacheEntry(filename, entry) {
+  try {
+    const db = await openTrackDB();
+    await new Promise((resolve, reject) => {
+      const tx = db.transaction(IDB_STORE, 'readwrite');
+      tx.objectStore(IDB_STORE).put(entry, filename);
+      tx.oncomplete = resolve;
+      tx.onerror = () => reject(tx.error);
+    });
+  } catch (e) {
+    console.warn('Track-Cache-Eintrag konnte nicht gespeichert werden:', e);
+  }
+}
+
+async function removeTrackCacheEntries(filenames) {
+  if (!filenames.length) return;
+  try {
+    const db = await openTrackDB();
+    await new Promise((resolve, reject) => {
+      const tx = db.transaction(IDB_STORE, 'readwrite');
+      const store = tx.objectStore(IDB_STORE);
+      filenames.forEach(name => store.delete(name));
+      tx.oncomplete = resolve;
+      tx.onerror = () => reject(tx.error);
+    });
+  } catch (e) { /* nicht kritisch */ }
 }
 
 async function fetchTracksFromGitHub(onTrack) {
@@ -362,8 +416,8 @@ async function fetchTracksFromGitHub(onTrack) {
   }
   const gpxFiles = items.filter(it => it.type === 'file' && it.name.toLowerCase().endsWith('.gpx'));
 
-  const oldCache = loadTrackCache();
-  const newCache = {};
+  const oldCache = await loadTrackCache();
+  const currentNames = new Set(gpxFiles.map(f => f.name));
   const results = [];
   let failed = 0;
   let fetchedCount = 0;
@@ -374,7 +428,6 @@ async function fetchTracksFromGitHub(onTrack) {
     if (cached && cached.sha === file.sha) {
       // Unverändert seit letztem Besuch - aus dem Cache übernehmen, kein Download nötig
       results.push(cached.track);
-      newCache[file.name] = cached;
       if (onTrack) onTrack(cached.track, results.length, totalFiles);
       continue;
     }
@@ -383,8 +436,11 @@ async function fetchTracksFromGitHub(onTrack) {
       const text = await rawRes.text();
       const t = parseGPXFile(text, file.name);
       results.push(t);
-      newCache[file.name] = { sha: file.sha, track: t };
       fetchedCount++;
+      // Sofort einzeln cachen - nicht erst am Ende der ganzen Schleife.
+      // So geht bei einem Reload mitten im Laden nichts verloren, was
+      // bereits fertig war.
+      saveTrackCacheEntry(file.name, { sha: file.sha, track: t });
       if (onTrack) onTrack(t, results.length, totalFiles);
     } catch (e) {
       console.error('Fehler beim Laden von', file.name, e);
@@ -392,9 +448,9 @@ async function fetchTracksFromGitHub(onTrack) {
     }
   }
 
-  // Cache neu schreiben (Dateien, die im Ordner gelöscht wurden, fallen
-  // dabei automatisch raus, da newCache nur aktuell vorhandene enthält)
-  saveTrackCache(newCache);
+  // Cache-Einträge für Dateien entfernen, die im Ordner nicht mehr existieren
+  const staleNames = Object.keys(oldCache).filter(name => !currentNames.has(name));
+  removeTrackCacheEntries(staleNames);
 
   return {
     tracks: results,
@@ -963,24 +1019,32 @@ function showLoadStatus(msg, kind) {
 }
 
 async function initFromGitHub() {
-  const cachePresent = Object.keys(loadTrackCache()).length > 0;
+  const cache = await loadTrackCache();
+  const cachePresent = Object.keys(cache).length > 0;
   showLoadStatus(cachePresent ? 'Prüfe auf neue Tracks …' : 'Lade Tracks von GitHub …', 'loading');
 
   tracks = [];
   visibleSet = new Set();
   clearLayers();
   applyStaticText();
+  map.setView([47.6, 11.3], 9); // grober Alpenraum-Startblick, bis die ersten Tracks da sind
 
   let lastSidebarRender = 0;
+  let lastBoundsFit = 0;
   const onTrack = (t, loadedCount, total) => {
     tracks.push(t);
     visibleSet.add(t.file);
     addLayerForTrack(t);
     showLoadStatus('Lade Tracks … (' + loadedCount + ' / ' + total + ')', 'loading');
-    // Seitenleiste nicht bei jedem einzelnen Track neu aufbauen (unnötig
-    // aufwendig), aber alle paar Tracks bzw. am Ende, damit man auch dort
-    // den Fortschritt sieht.
+    // Seitenleiste und Kartenausschnitt nicht bei jedem einzelnen Track neu
+    // aufbauen (unnötig aufwendig), aber alle paar hundert Millisekunden
+    // bzw. beim allerersten Track, damit man sofort sieht, wie sich die
+    // Karte füllt, statt auf eine leere/falsch zentrierte Karte zu starren.
     const now = Date.now();
+    if (loadedCount === 1 || now - lastBoundsFit > 600) {
+      fitAllBounds();
+      lastBoundsFit = now;
+    }
     if (now - lastSidebarRender > 400) {
       renderSidebar();
       lastSidebarRender = now;
